@@ -6,6 +6,7 @@ def L_metric(feat1, feat2, same_class=True):
         feat1 same size as feat2
         feat size: (batch_size, atts, feat_size)
     '''
+
     d = torch.sum((feat1 - feat2).pow(2).view((-1, feat1.size(-1))), 1)
     if same_class:
         return d.sum() / d.size(0)

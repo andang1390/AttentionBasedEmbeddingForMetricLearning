@@ -17,10 +17,10 @@ class BalancedBatchSampler(Sampler):
         # Save all the indices for all the classes
         for idx in range(0, len(dataset)):
             label = self._get_label(dataset, idx)
+
             if label not in self.dataset:
                 self.dataset[label] = []
             self.dataset[label].append(idx)
-        
         num_samples = [len(value) for value in self.dataset.values()]
         self.max_samples = max(num_samples)
         self.min_samples = min(num_samples)
@@ -29,13 +29,17 @@ class BalancedBatchSampler(Sampler):
     
         self.keys = list(self.dataset.keys())
         self.class_probs = torch.Tensor([1/len(self.keys)]*len(self.keys))
+        #import pdb;pdb.set_trace()
+
         print('BalancedBatchSampler len:', self.__len__(), 'self.keys len=', len(self.keys))
         #self.currentkey = 0
 
     def __iter__(self):
         for i in range(self.__len__()):
             batch = []
+            
             classes = torch.multinomial(self.class_probs, int(self.batch_size/self.batch_k))
+            #import pdb;pdb.set_trace()
             for cls in classes:
                 cls_idxs = self.dataset[self.keys[cls]]
                 for k in torch.multinomial(torch.Tensor([1/len(cls_idxs)]*len(cls_idxs)), self.batch_k):
@@ -48,8 +52,11 @@ class BalancedBatchSampler(Sampler):
         return int(len(self.keys) * comb(self.min_samples, self.batch_k) / self.batch_size)
         
     def _get_label(self, dataset, idx):
+        #import pdb;pdb.set_trace()
+        return dataset.ids[idx]
         dataset_type = type(dataset)
         if dataset_type is torchvision.datasets.MNIST:
+            
             return dataset.train_labels[idx].item()
         elif isinstance(dataset, torchvision.datasets.ImageFolder):
             return dataset.imgs[idx][1]

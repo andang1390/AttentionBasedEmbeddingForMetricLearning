@@ -100,7 +100,10 @@ class MetricLearner(GoogLeNet.GoogLeNet):
         embedding = torch.cat([self.feat_global(atts[i]*sp).unsqueeze(1) for i in range(self.att_heads)], 1)
         #print('embedding in forward:', embedding.shape)
         embedding = torch.flatten(embedding, 1)
+        
+
         if sampling:
+
             return self.sampled(embedding) if not ret_att else (self.sampled(embedding), atts)
         else:
             return (embedding, atts) if ret_att else embedding
@@ -121,7 +124,7 @@ def get_distance(x):
     dist = dist.sqrt()
     return dist
 
-class   DistanceWeightedSampling(nn.Module):
+class DistanceWeightedSampling(nn.Module):
 
     def __init__(self, batch_k, cutoff=0.5, nonzero_loss_cutoff=1.4, normalize =False,  **kwargs):
         super(DistanceWeightedSampling,self).__init__()
@@ -153,6 +156,8 @@ class   DistanceWeightedSampling(nn.Module):
         for i in range(0,n,k):
             mask[i:i+k, i:i+k] = 0
 
+
+
         mask_uniform_probs = mask.double() *(1.0/(n-k))
 
         weights = weights*mask*((distance < self.nonzero_loss_cutoff).float()) + 1e-8
@@ -166,6 +171,24 @@ class   DistanceWeightedSampling(nn.Module):
 
         np_weights = weights.cpu().numpy()
         # np_weights = np.nan_to_num(np_weights, 1e-8)
+
+        # From https://github.com/suruoxi/DistanceWeightedSampling/blob/master/model.py#L151
+        for i in range(n):
+            block_idx = i // k
+
+            if weights_sum[i] != 0:
+                n_indices +=  np.random.choice(n, k-1, p=np_weights[i]).tolist()
+            else:
+                n_indices +=  np.random.choice(n, k-1, p=mask_uniform_probs[i]).tolist()
+            for j in range(block_idx * k, (block_idx + 1)*k):
+                if j != i:
+                    a_indices.append(i)
+                    p_indices.append(j)
+
+        return  a_indices, x_in[a_indices], x_in[p_indices], x[n_indices], x_in
+
+
+        # Original code    
         for i in range(n):
             block_idx = i // k
 
@@ -178,7 +201,9 @@ class   DistanceWeightedSampling(nn.Module):
                     a_indices.append(i)
                     p_indices.append(j)
 
-        return  a_indices, x_in[a_indices], x_in[p_indices], x_in[n_indices], x_in
+        # Changed: x_in[n_indices] -> x_in[p_indices]
+        #return  a_indices, x_in[a_indices], x_in[p_indices], x_in[n_indices], x_in
+        return  a_indices, x_in[a_indices], x_in[p_indices], x_in[p_indices], x_in
 
 
 

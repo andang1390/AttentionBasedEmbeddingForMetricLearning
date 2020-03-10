@@ -19,6 +19,8 @@ from PIL import Image
 from sampler import BalancedBatchSampler
 from model import MetricLearner
 from dataset import MetricData, SourceSampler, ImageFolderWithName, invTrans
+import torch.utils.data as data
+from random_sampler import RandomSampler, BatchSampler
 
 eps = 1e-8
 mlog = torchnet.logger.MeterLogger(env='logger')
@@ -27,13 +29,13 @@ writer = SummaryWriter()
 def get_args():
     parser = argparse.ArgumentParser(description='Face Occlusion Regression')
     # train
-    parser.add_argument('--pretrain', type=str, default='/root/.torch/models/googlenet-1378be20.pth', help='pretrain googLeNet model paht')
+    parser.add_argument('--pretrain', type=str, default='/home/prox/.torch/models/googlenet11-1378be20.pth', help='pretrain googLeNet model paht')
     parser.add_argument('--att-heads', type=int, default=8, help='number of attention modules')
     parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0  0,1,2, 0,2. use -1 for CPU')
     parser.add_argument('--epochs', type=int, default=200, help='number of epochs plans to train in total')
     parser.add_argument('--epoch_start', type=int, default=0, help='start epoch to count from')
-    parser.add_argument('--batch', type=int, default=8, help='batch size')
-    parser.add_argument('--batch_k', type=int, default=4, help='number of samples for a class of a batch')
+    parser.add_argument('--batch', type=int, default=16, help='batch size')
+    parser.add_argument('--batch_k', type=int, default=2, help='number of samples for a class of a batch')
     parser.add_argument('--num_batch', type=int, default=5000, help='number of batches per epoch')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--ckpt', type=str, default='./ckpt', help='checkpoint folder')
@@ -44,7 +46,7 @@ def get_args():
     parser.add_argument('--test', action='store_true', help='switch on test mode')
     parser.add_argument('--find-lr', action='store_true', help='find a suitable lr for training.')
     # annotation
-    parser.add_argument('--img_folder', type=str, required=True, help='folder of image files in annotation file')
+    #parser.add_argument('--img_folder', type=str, required=True, help='folder of image files in annotation file')
     parser.add_argument('--img_folder_test', type=str, default='', help='folder of test image files in annotaion file')
     # model hyperparameter
     parser.add_argument('--in_size', type=int, default=128, help='input tensor shape to put into model')
@@ -70,11 +72,124 @@ else:
     device = torch.device('cpu')
 
 #data = MetricData(data_root=args.img_folder, anno_file=args.anno, idx_file=args.idx_file)
+"""
 data = imagefolder(args.img_folder)
 data_test = imagefolder(args.img_folder_test)
 dataset = torch.utils.data.DataLoader(data, batch_sampler=BalancedBatchSampler(data, batch_size=args.batch, batch_k=args.batch_k, length=args.num_batch), \
                                         num_workers=args.num_workers)
 dataset_test = torch.utils.data.DataLoader(data_test, batch_sampler=BalancedBatchSampler(data_test, batch_size=args.batch, batch_k=args.batch_k, length=args.num_batch//2))
+"""
+DATASET_BASE_IN_SHOP = r'/home/prox/Downloads/deepfashion1_dataset/in-shop_clothes_retrieval'
+class Fashion_inshop(data.Dataset):
+    def __init__(self, type, transform):
+        self.transforms = transform
+        self.anno_path = os.path.join(DATASET_BASE_IN_SHOP, 'Anno')
+        #self.imgs_path = os.path.join(, 'Anno')
+        if type == "train":
+            self.get_train()
+        elif type=="test":
+            self.get_test()
+            
+    def readlines(self, path, int_=False):
+        lst = []
+        with open(path, "r") as f:
+            for line in f:
+                l = line.replace("\n", "")
+                if int_:
+                    l = int(l)
+                lst.append(l)
+        return lst
+    
+    def get_train(self):
+        self.imgs_path = os.path.join(self.anno_path, 'train_img.txt')
+        self.ids_path = os.path.join(self.anno_path, "train_id.txt")
+        self.get()
+
+    def get_test(self):
+        self.imgs_path = os.path.join(self.anno_path, 'gallery_img.txt')
+        self.ids_path = os.path.join(self.anno_path, "gallery_id.txt")
+        self.get()
+
+        
+    def get(self):
+        imgs_path = self.imgs_path
+        ids_path = self.ids_path
+        self.imgs = self.readlines(imgs_path)
+        self.ids = self.readlines(ids_path, int_=True)
+
+        lst = {}
+        for idx in range(0, len(self.imgs)):
+            label = self.ids[idx]
+            img = self.imgs[idx]
+
+            if label not in lst:
+                lst[label] = []
+            lst[label].append(idx)
+
+        # skip clothing items with less than
+        # 2 images
+        new_imgs = []
+        new_labels = []
+        self.number_of_classes = 0
+        for key, val in lst.items():
+            if len(val) < 2:
+                continue
+            else:
+                self.number_of_classes += 1
+                for x in val:
+                    new_imgs.append(self.imgs[x])
+                    new_labels.append(self.ids[x])
+
+        # need number of classes to be even,
+        # when subtracting with batch_k = (2)
+        #if args.batch_k isnt 2, fix this code..
+        assert args.batch_k == 2
+        if self.number_of_classes % 2 != 0:
+            self.number_of_classes -= 1
+            del self.imgs[-1]
+
+        self.imgs = new_imgs
+        self.ids = new_labels
+        #import pdb;pdb.set_trace()
+    def __len__(self):
+        return len(self.imgs)
+
+    def __getitem__(self, i):
+        # print('__getitem__\t', i, i%16, '\tlabel:', self.labels[i])
+        #label = self.labels[i]
+        img = Image.open(os.path.join(DATASET_BASE_IN_SHOP, self.imgs[i])).convert('RGB')
+        img = self.transforms(img)
+        return (img, self.ids[i])
+
+
+transforms_ = transforms.Compose([
+    transforms.Resize(228),
+    transforms.RandomCrop((224, 224)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                        std=[0.229, 0.224, 0.225])])
+
+data = Fashion_inshop(type="train", transform=transforms_)
+
+sampler = RandomSampler(data, args.batch)
+batch_sampler = BatchSampler(sampler, args.batch, True)
+    
+dataset = torch.utils.data.DataLoader(data,
+                                      batch_sampler=batch_sampler,
+                                      #batch_sampler=BalancedBatchSampler(data, batch_size=data.number_of_classes, batch_k=args.batch_k, length=args.num_batch), 
+                                        num_workers=args.num_workers
+    )
+data_test = Fashion_inshop(type="test", transform=transforms_)
+test_sampler = RandomSampler(data_test, args.batch)
+test_batch_sampler = BatchSampler(test_sampler, args.batch, True)
+
+dataset_test = torch.utils.data.DataLoader(data_test,
+                                           batch_sampler=test_batch_sampler,
+                                           #batch_sampler=BalancedBatchSampler(data_test, batch_size=data.number_of_classes, batch_k=args.batch_k, length=args.num_batch//2)
+)
+
+
 model = MetricLearner(pretrain=args.pretrain, normalize=True, batch_k=args.batch_k, att_heads=args.att_heads)
 if not os.path.exists(args.ckpt):
     os.makedirs(args.ckpt)
@@ -98,6 +213,7 @@ one_cycle = OneCycle( int(len(dataset)*(args.epochs-args.epoch_start)/args.batch
 
 
 def find_lr(init_value = 1e-8, final_value=10., beta = 0.98):
+    print("here")
     num = len(dataset)-1
     mult = (final_value / init_value) ** (1/num)
     lr = init_value
@@ -117,7 +233,7 @@ def find_lr(init_value = 1e-8, final_value=10., beta = 0.98):
         anchors = anchors.view(anchors.size(0), args.att_heads, -1)
         positives = positives.view(positives.size(0), args.att_heads, -1)
         negatives = negatives.view(negatives.size(0), args.att_heads, -1)
-
+        
         l_div, l_homo, l_heter = criterion.criterion(anchors, positives, negatives)
         loss = l_div + l_homo + l_heter
         #Compute the smoothed loss
@@ -206,14 +322,21 @@ if __name__ == '__main__':
 
     try:
         for epoch in range(start_epoch, args.epochs):
+            
             model.train()
 
             loss_div, loss_homo, loss_heter = 0, 0, 0
             for i, batch in enumerate(dataset):
+
                 x, y = batch
+
                 x = x.to(device)
+                
                 out, atts = model(x, ret_att=True, sampling=True)
+                #import pdb;pdb.set_trace()
                 a_indices, anchors, positives, negatives, _ = out
+                
+
                 anchors = anchors.view(anchors.size(0), args.att_heads, -1)
                 positives = positives.view(positives.size(0), args.att_heads, -1)
                 negatives = negatives.view(negatives.size(0), args.att_heads, -1)
@@ -223,6 +346,7 @@ if __name__ == '__main__':
                     update_lr(optimizer, lr)
                     update_mom(optimizer, mom)
                 optimizer.zero_grad()
+
                 l_div, l_homo, l_heter = criterion.criterion(anchors, positives, negatives)
                 l = l_div + l_homo + l_heter
                 l.backward()
