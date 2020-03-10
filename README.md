@@ -1,3 +1,8 @@
+# Note on fork
+Tried to tweak code to work on deepfashion1 INSHOP dataset, which results was shown on in original paper.
+
+Note: Didnt finish tweaking the code to get the numbers from original paper.
+
 # AttentionBasedEmbeddingForMetricLearning
 Pytorch Implementation of paper Attention-based Ensemble for Deep Metric Learning
 
